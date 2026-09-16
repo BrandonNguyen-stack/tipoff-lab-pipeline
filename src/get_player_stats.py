@@ -9,7 +9,15 @@ TRICODE_FIX = {
 def normalize_tricode(code):
     return TRICODE_FIX.get(code, code)
 
-def get_player_stats(season="2025-26"):
+def current_season():
+    from datetime import date
+    today = date.today()
+    start_year = today.year if today.month >= 10 else today.year - 1
+    return f"{start_year}-{str(start_year + 1)[2:]}"
+
+def get_player_stats(season=None):
+    if season is None:
+        season = current_season()
     print("Fetching player stats from NBA API...")
     df = leaguedashplayerstats.LeagueDashPlayerStats(
         season=season,

@@ -9,7 +9,6 @@ from supabase import create_client
 from dotenv import load_dotenv
 
 sys.path.insert(0, "src")
-from build_features import get_rolling_team_stats
 from predict import predict_today
 from get_injuries import get_injuries
 from get_standings import get_standings
@@ -142,14 +141,11 @@ def run_daily_update(game_date=None):
         return
 
     # Only fetch odds once per day (expensive API call)
-    from datetime import datetime
-    current_hour = datetime.utcnow().hour
-
     # Check if we already have odds for today's games
     existing = supabase.table("predictions").select("home_team,away_team,spread,total").eq("game_date", game_date).execute()
     existing_odds = {(r["home_team"], r["away_team"]): (r["spread"], r["total"]) for r in existing.data if r.get("spread") is not None}
 
-    if existing_odds and len(existing_odds) == len(matchups_raw):
+    if existing_odds:
         print("Using cached odds from Supabase.")
         odds_map = existing_odds
     else:
@@ -185,8 +181,6 @@ def run_daily_update(game_date=None):
     for r in results:
         print(f"  {r['watchability']:.1f}/10 - {r['away_team']} @ {r['home_team']}: {r['reasons']}")
 
-    supabase.table("predictions").delete().eq("game_date", str(game_date)).execute()
-
     rows = []
     for r in results:
         spread, total = odds_map.get((r["home_team"], r["away_team"]), (None, None))
@@ -204,6 +198,7 @@ def run_daily_update(game_date=None):
                 team_injuries.get(r["away_team"], {}).get("out", [])[:2]
             ),
         })
+    supabase.table("predictions").delete().eq("game_date", str(game_date)).execute()
     supabase.table("predictions").insert(rows).execute()
     print(f"Saved {len(rows)} predictions to Supabase.")
 

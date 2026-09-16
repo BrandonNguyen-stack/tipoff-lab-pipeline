@@ -12,13 +12,16 @@ def get_supabase():
     return create_client(SUPABASE_URL, SUPABASE_KEY)
 
 def save_cache(key, data):
-    sb = get_supabase()
-    sb.table("cache").upsert({
-        "key": key,
-        "data": data,
-        "updated_at": datetime.now(timezone.utc).isoformat()
-    }).execute()
-    print(f"Cached {key}.")
+    try:
+        sb = get_supabase()
+        sb.table("cache").upsert({
+            "key": key,
+            "data": data,
+            "updated_at": datetime.now(timezone.utc).isoformat()
+        }).execute()
+        print(f"Cached {key}.")
+    except Exception as e:
+        print(f"Cache save failed for {key}: {e}")
 
 def load_cache(key, max_age_hours=23):
     try:

@@ -1,5 +1,7 @@
 import requests
 from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
+from cache_manager import load_cache, save_cache
 
 ESPN_TEAM_SCHEDULE_URL = "https://site.api.espn.com/apis/site/v2/sports/basketball/nba/teams/{team_id}/schedule"
 
@@ -20,6 +22,30 @@ ESPN_TRICODE_FIX = {
 def normalize_tricode(code):
     return ESPN_TRICODE_FIX.get(code, code)
 
+def _event_date_to_local(date_str):
+    return datetime.fromisoformat(date_str.replace("Z", "+00:00")).astimezone(ZoneInfo("America/Los_Angeles")).date()
+
+def get_all_schedules():
+    cached = load_cache("schedules", max_age_hours=6)
+    if cached is not None:
+        return cached
+    schedules = {}
+    for tricode, team_id in TRICODE_TO_ESPN_ID.items():
+        try:
+            url = ESPN_TEAM_SCHEDULE_URL.format(team_id=team_id)
+            r = requests.get(url, timeout=10)
+            r.raise_for_status()
+            events = r.json().get("events", [])
+            dates = []
+            for event in events:
+                dates.append(event["date"])
+            schedules[tricode] = dates
+        except Exception as e:
+            print(f"Schedule fetch failed for {tricode}: {e}")
+            schedules[tricode] = []
+    save_cache("schedules", schedules)
+    return schedules
+
 def get_team_recent_games(tricode, game_date_str):
     team_id = TRICODE_TO_ESPN_ID.get(tricode)
     if not team_id:
@@ -32,7 +58,7 @@ def get_team_recent_games(tricode, game_date_str):
         game_date = datetime.strptime(game_date_str, "%Y-%m-%d").date()
         past_games = []
         for event in events:
-            event_date = datetime.fromisoformat(event["date"].replace("Z", "+00:00")).date()
+            event_date = _event_date_to_local(event["date"])
             if event_date < game_date:
                 past_games.append(event_date)
         past_games.sort(reverse=True)
@@ -41,9 +67,16 @@ def get_team_recent_games(tricode, game_date_str):
         print(f"Schedule fetch failed for {tricode}: {e}")
         return []
 
-def get_rest_stats(tricode, game_date_str):
-    past_games = get_team_recent_games(tricode, game_date_str)
+def get_rest_stats(tricode, game_date_str, schedules=None):
     game_date = datetime.strptime(game_date_str, "%Y-%m-%d").date()
+
+    if schedules is not None and tricode in schedules:
+        past_games = sorted(
+            (d for d in (_event_date_to_local(e) for e in schedules[tricode]) if d < game_date),
+            reverse=True,
+        )
+    else:
+        past_games = get_team_recent_games(tricode, game_date_str)
 
     if not past_games:
         return {"rest_days": 7, "b2b": False, "3in4": False}
@@ -64,8 +97,9 @@ def get_rest_stats(tricode, game_date_str):
     }
 
 def get_schedule_stats(home_team, away_team, game_date_str):
-    home = get_rest_stats(home_team, game_date_str)
-    away = get_rest_stats(away_team, game_date_str)
+    schedules = get_all_schedules()
+    home = get_rest_stats(home_team, game_date_str, schedules)
+    away = get_rest_stats(away_team, game_date_str, schedules)
     print(f"  {home_team} rest: {home['rest_days']}d, b2b: {home['b2b']}, 3in4: {home['3in4']}")
     print(f"  {away_team} rest: {away['rest_days']}d, b2b: {away['b2b']}, 3in4: {away['3in4']}")
     return home, away
