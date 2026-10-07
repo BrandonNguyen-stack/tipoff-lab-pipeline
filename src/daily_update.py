@@ -4,7 +4,8 @@ import pickle
 import sys
 import os
 import requests
-from datetime import date
+from datetime import datetime
+from zoneinfo import ZoneInfo
 from supabase import create_client
 from dotenv import load_dotenv
 
@@ -125,7 +126,7 @@ def get_todays_games(game_date=None):
 
 def run_daily_update(game_date=None):
     if game_date is None:
-        game_date = date.today().strftime("%Y-%m-%d")
+        game_date = datetime.now(ZoneInfo("America/Los_Angeles")).strftime("%Y-%m-%d")
     print(f"Running daily update for {game_date}...")
     supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 
@@ -140,29 +141,39 @@ def run_daily_update(game_date=None):
         print("No games today, exiting.")
         return
 
-    # Only fetch odds once per day (expensive API call)
-    # Check if we already have odds for today's games
-    existing = supabase.table("predictions").select("home_team,away_team,spread,total").eq("game_date", game_date).execute()
-    existing_odds = {(r["home_team"], r["away_team"]): (r["spread"], r["total"]) for r in existing.data if r.get("spread") is not None}
-
-    if existing_odds:
-        print("Using cached odds from Supabase.")
-        odds_map = existing_odds
+    odds_key = f"odds_{game_date}"
+    cached_odds = load_cache(odds_key)
+    if cached_odds is not None:
+        odds_map = {tuple(k.split("@")): tuple(v) for k, v in cached_odds.items()}
     else:
         print("Fetching fresh odds from API...")
-        odds_map = get_odds()
+        try:
+            odds_map = get_odds()
+        except Exception as e:
+            print(f"Warning: odds fetch failed, continuing without lines: {e}")
+            odds_map = {}
+        save_cache(odds_key, {f"{h}@{a}": list(v) for (h, a), v in odds_map.items()})
 
     print("Fetching standings...")
     standings = load_cache("standings")
     if standings is None:
-        standings = get_standings()
-        save_cache("standings", standings)
+        try:
+            standings = get_standings()
+            save_cache("standings", standings)
+        except Exception as e:
+            print(f"Warning: standings fetch failed, continuing without them: {e}")
+            standings = {}
 
     print("Fetching player stats...")
     player_stats = load_cache("player_stats")
-    if player_stats is None:
-        player_stats = get_player_stats()
-        save_cache("player_stats", player_stats)
+    if not player_stats:
+        try:
+            player_stats = get_player_stats()
+        except Exception as e:
+            print(f"Warning: player stats fetch failed, continuing without them: {e}")
+            player_stats = {}
+        if player_stats:
+            save_cache("player_stats", player_stats)
 
     print("Fetching injury report...")
     team_injuries = get_injuries()

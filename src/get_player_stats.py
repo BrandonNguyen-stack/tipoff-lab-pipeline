@@ -15,14 +15,27 @@ def current_season():
     start_year = today.year if today.month >= 10 else today.year - 1
     return f"{start_year}-{str(start_year + 1)[2:]}"
 
+def previous_season(season):
+    start_year = int(season[:4]) - 1
+    return f"{start_year}-{str(start_year + 1)[2:]}"
+
+def fetch_season_df(season):
+    return leaguedashplayerstats.LeagueDashPlayerStats(
+        season=season,
+        per_mode_detailed="PerGame",
+        timeout=60,
+    ).get_data_frames()[0]
+
 def get_player_stats(season=None):
     if season is None:
         season = current_season()
-    print("Fetching player stats from NBA API...")
-    df = leaguedashplayerstats.LeagueDashPlayerStats(
-        season=season,
-        per_mode_detailed="PerGame"
-    ).get_data_frames()[0]
+    print(f"Fetching player stats from NBA API ({season})...")
+    df = fetch_season_df(season)
+    # Preseason / early season: no stats yet, use last season
+    if df.empty:
+        season = previous_season(season)
+        print(f"No stats yet, falling back to {season}...")
+        df = fetch_season_df(season)
 
     df["TEAM_ABBREVIATION"] = df["TEAM_ABBREVIATION"].apply(normalize_tricode)
 
